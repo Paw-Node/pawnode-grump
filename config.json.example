@@ -1,0 +1,25 @@
+{
+  "target_cidr": "10.0.10.0/24",
+  "redis_host": "localhost",
+  "redis_port": 6379,
+  "redis_ttl": 60,
+  "redis_prefix": "grump",
+  "listen_address": "127.0.0.1",
+  "max_scans_per_ip": 5,
+  "max_scans_per_ip_timeout": 60,
+  "disallowed_hosts": ["10.0.10.1"],
+  "port_ranges": [
+    {
+      "start": 26000,
+      "end": 27000
+    },
+    {
+      "start": 28500,
+      "end": 29000
+    }
+  ],
+  "timeouts": {
+    "26060": 2000,
+    "27015": 1500
+  }
+}

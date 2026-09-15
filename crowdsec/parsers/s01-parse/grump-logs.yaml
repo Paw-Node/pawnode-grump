@@ -1,0 +1,23 @@
+# CrowdSec parser for GRUMP structured JSON logs.
+# Place in /etc/crowdsec/parsers/s01-parse/grump-logs.yaml
+onsuccess: next_stage
+filter: "evt.Parsed.program == 'grump' || evt.Line.Labels.type == 'grump'"
+name: grump/grump-logs
+description: "Parse GRUMP JSON connection logs"
+statics:
+  - parsed: json_payload
+    expression: UnmarshalJSON(evt.Line.Raw, evt.Unmarshaled, "grump")
+  - meta: source_ip
+    expression: evt.Unmarshaled.grump.src_ip
+  - meta: source_port
+    expression: evt.Unmarshaled.grump.src_port
+  - meta: destination_port
+    expression: evt.Unmarshaled.grump.dst_port
+  - meta: proto
+    expression: evt.Unmarshaled.grump.proto
+  - meta: grump_result
+    expression: evt.Unmarshaled.grump.result
+  - meta: log_type
+    value: grump
+  - target: evt.StrTime
+    expression: evt.Unmarshaled.grump.timestamp

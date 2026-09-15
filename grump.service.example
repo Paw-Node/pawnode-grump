@@ -1,0 +1,16 @@
+[Unit]
+Description=GRUMP - Game Routing Unified Mapping Proxy
+After=network.target
+Wants=network.target
+
+[Service]
+ExecStart=/opt/grump/grump
+WorkingDirectory=/opt/grump
+User=grump
+Group=grump
+Restart=on-failure
+RestartSec=3
+Environment=HOME=/opt/grump
+
+[Install]
+WantedBy=multi-user.target

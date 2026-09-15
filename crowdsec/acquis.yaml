@@ -1,0 +1,15 @@
+# CrowdSec acquisition for GRUMP running under systemd.
+# Place in /etc/crowdsec/acquis.d/grump.yaml
+source: journalctl
+journalctl_filter:
+  - "_SYSTEMD_UNIT=grump.service"
+labels:
+  type: grump
+---
+# Alternative: GRUMP running in Docker.
+# Requires the crowdsecurity/docker acquisition datasource.
+source: docker
+container_name:
+  - grump
+labels:
+  type: grump

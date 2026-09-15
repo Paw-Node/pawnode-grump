@@ -1,0 +1,14 @@
+# CrowdSec scenario: ban IPs that trigger GRUMP's scan rate limiter
+# or repeatedly probe ports. Place in /etc/crowdsec/scenarios/grump-portscan.yaml
+type: leaky
+name: grump/portscan
+description: "Detect port scanning against GRUMP"
+filter: "evt.Meta.log_type == 'grump' && evt.Meta.grump_result in ['RATE_LIMIT', 'NO_TARGET']"
+groupby: evt.Meta.source_ip
+capacity: 3
+leakspeed: 20s
+blackhole: 5m
+labels:
+  service: grump
+  type: scan
+  remediation: true
