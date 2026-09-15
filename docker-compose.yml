@@ -1,0 +1,39 @@
+services:
+  grump:
+    image: ghcr.io/paw-node/pawnode-grump:latest
+    container_name: grump
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./config.json:/opt/grump/config.json:ro
+    depends_on:
+      - redis
+      - crowdsec
+
+  redis:
+    image: redis:7-alpine
+    container_name: grump-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    restart: unless-stopped
+    environment:
+      # Pull docker logs from the grump container
+      COLLECTIONS: "crowdsecurity/linux"
+    ports:
+      - "127.0.0.1:8080:8080" # Local API (used by grump's built-in bouncer)
+    volumes:
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.d/grump.yaml:ro
+      - ./crowdsec/parsers/s01-parse/grump-logs.yaml:/etc/crowdsec/parsers/s01-parse/grump-logs.yaml:ro
+      - ./crowdsec/scenarios/grump-portscan.yaml:/etc/crowdsec/scenarios/grump-portscan.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - crowdsec-db:/var/lib/crowdsec/data
+      - crowdsec-config:/etc/crowdsec
+
+volumes:
+  crowdsec-db:
+  crowdsec-config:

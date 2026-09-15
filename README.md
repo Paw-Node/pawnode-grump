@@ -58,6 +58,30 @@
    ```
 ---
 
+## Docker
+
+Images are published to GHCR on every merge to `main` (`:latest`, `:sha-<short>`) and on GitHub releases (`:<version>`).
+
+```bash
+docker run -d --name grump \
+  --network host \
+  -v /opt/grump/config.json:/opt/grump/config.json:ro \
+  ghcr.io/paw-node/pawnode-grump:latest
+```
+
+### Docker Compose
+
+A [`docker-compose.yml`](docker-compose.yml) is included that runs GRUMP alongside Redis and a CrowdSec agent pre-wired with the configs from `crowdsec/`:
+
+```bash
+docker compose up -d
+
+# Register grump's built-in bouncer with the agent, then set the key in config.json
+docker exec crowdsec cscli bouncers add grump
+```
+
+---
+
 ## Systemd Integration
 
 1. **Create service file** at `/etc/systemd/system/grump.service`:
