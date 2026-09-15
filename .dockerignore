@@ -1,0 +1,7 @@
+.git
+.github
+grump
+config.json
+*.md
+crowdsec
+grump.service.example
