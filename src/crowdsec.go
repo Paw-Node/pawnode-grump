@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/crowdsecurity/crowdsec/pkg/models"
 	csbouncer "github.com/crowdsecurity/go-cs-bouncer"
 )
 
@@ -18,71 +22,140 @@ type crowdsecBouncer struct {
 
 var bouncer *crowdsecBouncer
 
+// crowdsecRestartDelay is how long to wait before rebuilding a decision
+// stream that stopped. A var so tests can shorten it.
+var crowdsecRestartDelay = 10 * time.Second
+
+// newStream builds each decision stream the bouncer runs. A var so tests can
+// substitute one that fails.
+var newStream = newStreamBouncer
+
 // initCrowdsec starts the CrowdSec stream bouncer in the background if
-// enabled in config. Returns an error only on startup failure.
+// enabled in config. Returns an error only for invalid configuration; once
+// running, LAPI outages are retried in the background and never stop grump.
 func initCrowdsec() error {
 	if !config.CrowdsecEnabled {
 		return nil
 	}
 
+	// Validate up front so a misconfiguration fails at startup rather than in
+	// the restart loop.
+	if _, err := newStreamBouncer(); err != nil {
+		return err
+	}
+
+	bouncer = &crowdsecBouncer{bannedIPs: make(map[string]struct{})}
+	go bouncer.run(ctx)
+
+	logJSON("info", "CrowdSec bouncer enabled", map[string]interface{}{"api_url": config.CrowdsecAPIURL})
+	return nil
+}
+
+func newStreamBouncer() (*csbouncer.StreamBouncer, error) {
 	stream := &csbouncer.StreamBouncer{
 		APIKey:         config.CrowdsecAPIKey,
 		APIUrl:         config.CrowdsecAPIURL,
 		TickerInterval: config.CrowdsecTickerInterval,
 		UserAgent:      "grump-bouncer/" + buildVersion(),
 		// Without this, a LAPI that is not answering yet when grump starts (boot
-		// order, CrowdSec restarting) makes Run close the stream and return, and
-		// grump keeps proxying with an empty ban list.
+		// order, CrowdSec restarting) makes Run close the stream and return.
 		RetryInitialConnect: true,
 	}
-
 	if err := stream.Init(); err != nil {
-		return err
+		return nil, err
 	}
+	return stream, nil
+}
 
-	bouncer = &crowdsecBouncer{bannedIPs: make(map[string]struct{})}
-
-	// Fail closed: if the decision stream ever stops, exit so the supervisor
-	// restarts grump rather than leaving it running without bans.
-	go func() {
-		err := stream.Run(ctx)
+// run keeps a decision stream alive for the life of the process. If a stream
+// stops it is rebuilt after crowdsecRestartDelay; the last known bans stay in
+// force in the meantime, and proxying carries on throughout.
+func (b *crowdsecBouncer) run(ctx context.Context) {
+	for {
+		stream, err := newStream()
+		if err == nil {
+			err = b.consume(ctx, stream)
+		}
 		if ctx.Err() != nil {
 			return
 		}
-		fields := map[string]interface{}{}
+
+		fields := map[string]interface{}{"retry_in": crowdsecRestartDelay.String()}
 		if err != nil {
 			fields["error"] = err.Error()
 		}
-		logFatal("CrowdSec decision stream stopped", fields)
-	}()
-	go func() {
-		for decisions := range stream.Stream {
-			bouncer.mu.Lock()
-			for _, d := range decisions.Deleted {
-				if d.Value == nil {
-					continue
-				}
-				bouncer.removeLocked(*d.Value)
-			}
-			for _, d := range decisions.New {
-				if d.Value == nil {
-					continue
-				}
-				bouncer.addLocked(*d.Value)
-			}
-			bouncer.mu.Unlock()
+		logJSON("error", "CrowdSec decision stream stopped, restarting", fields)
 
-			if len(decisions.New) > 0 || len(decisions.Deleted) > 0 {
-				logJSON("info", "CrowdSec decisions updated", map[string]interface{}{
-					"added":   len(decisions.New),
-					"deleted": len(decisions.Deleted),
-				})
-			}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(crowdsecRestartDelay):
 		}
+	}
+}
+
+// consume applies decisions from one stream until it stops. The first
+// response of a stream is the LAPI's full snapshot, so it replaces whatever
+// was held from a previous stream instead of merging into it.
+func (b *crowdsecBouncer) consume(ctx context.Context, stream *csbouncer.StreamBouncer) error {
+	done := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- fmt.Errorf("decision stream panicked: %v", r)
+			}
+		}()
+		done <- stream.Run(ctx)
 	}()
 
-	logJSON("info", "CrowdSec bouncer enabled", map[string]interface{}{"api_url": config.CrowdsecAPIURL})
-	return nil
+	snapshot := true
+	for {
+		select {
+		case err := <-done:
+			return err
+		case decisions, ok := <-stream.Stream:
+			if !ok {
+				return <-done
+			}
+			b.apply(decisions, snapshot)
+			snapshot = false
+		}
+	}
+}
+
+func (b *crowdsecBouncer) apply(decisions *models.DecisionsStreamResponse, snapshot bool) {
+	if decisions == nil {
+		return
+	}
+
+	b.mu.Lock()
+	if snapshot {
+		b.bannedIPs = make(map[string]struct{})
+		b.bannedNet = nil
+	}
+	for _, d := range decisions.Deleted {
+		if d.Value == nil {
+			continue
+		}
+		b.removeLocked(*d.Value)
+	}
+	for _, d := range decisions.New {
+		if d.Value == nil {
+			continue
+		}
+		b.addLocked(*d.Value)
+	}
+	total := len(b.bannedIPs) + len(b.bannedNet)
+	b.mu.Unlock()
+
+	if snapshot || len(decisions.New) > 0 || len(decisions.Deleted) > 0 {
+		logJSON("info", "CrowdSec decisions updated", map[string]interface{}{
+			"added":    len(decisions.New),
+			"deleted":  len(decisions.Deleted),
+			"snapshot": snapshot,
+			"total":    total,
+		})
+	}
 }
 
 func (b *crowdsecBouncer) addLocked(value string) {

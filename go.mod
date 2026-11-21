@@ -3,6 +3,7 @@ module grump
 go 1.25.2
 
 require (
+	github.com/crowdsecurity/crowdsec v1.7.6
 	github.com/crowdsecurity/go-cs-bouncer v0.0.21
 	github.com/redis/go-redis/v9 v9.7.3
 )
@@ -12,7 +13,6 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/crowdsecurity/crowdsec v1.7.6 // indirect
 	github.com/crowdsecurity/go-cs-lib v0.0.24 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
