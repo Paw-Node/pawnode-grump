@@ -30,6 +30,10 @@ func initCrowdsec() error {
 		APIUrl:         config.CrowdsecAPIURL,
 		TickerInterval: config.CrowdsecTickerInterval,
 		UserAgent:      "grump-bouncer/" + buildVersion(),
+		// Without this, a LAPI that is not answering yet when grump starts (boot
+		// order, CrowdSec restarting) makes Run close the stream and return, and
+		// grump keeps proxying with an empty ban list.
+		RetryInitialConnect: true,
 	}
 
 	if err := stream.Init(); err != nil {
@@ -38,7 +42,19 @@ func initCrowdsec() error {
 
 	bouncer = &crowdsecBouncer{bannedIPs: make(map[string]struct{})}
 
-	go stream.Run(ctx)
+	// Fail closed: if the decision stream ever stops, exit so the supervisor
+	// restarts grump rather than leaving it running without bans.
+	go func() {
+		err := stream.Run(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		fields := map[string]interface{}{}
+		if err != nil {
+			fields["error"] = err.Error()
+		}
+		logFatal("CrowdSec decision stream stopped", fields)
+	}()
 	go func() {
 		for decisions := range stream.Stream {
 			bouncer.mu.Lock()
